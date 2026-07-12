@@ -2,216 +2,207 @@ import requests
 import json
 import time
 import os
-from datetime import datetime
 
-# ================== CONFIG ==================
+# ========================= CONFIG =========================
 BOT_TOKEN = "8914784117:AAGbEGulg9rKF25cmMYedyAJlBaZjIkZy5Q"
 ADMIN_ID = 8877443750
+ADMIN_USERNAME = "@gaurav0247"
 EXTERNAL_API_BASE = "https://nitin-apis-the-best.vercel.app/api"
-DATA_FILE = "bot_data.json"
-FREE_CREDITS_ON_START = 2
-# ===========================================
+DATA_FILE = "users.json"
+# ========================================================
 
-def load_data():
+def load_users():
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except:
-            pass
-    return {"users": {}, "total_searches": 0, "referrals": {}}
+            return {}
+    return {}
 
-def save_data(data):
+def save_users(users):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(users, f, indent=2, ensure_ascii=False)
+
+def get_user_data(user_id):
+    users = load_users()
+    uid = str(user_id)
+    if uid not in users:
+        users[uid] = {
+            "free_uses": 2,
+            "credits": 0,
+            "referrals": 0,
+            "referred_by": None
+        }
+        save_users(users)
+    return users[uid]
+
+def update_user_data(user_id, **kwargs):
+    users = load_users()
+    uid = str(user_id)
+    if uid not in users:
+        users[uid] = {"free_uses": 2, "credits": 0, "referrals": 0, "referred_by": None}
+    
+    for key, value in kwargs.items():
+        if key in users[uid]:
+            users[uid][key] = value
+    save_users(users)
+
+def is_admin(chat_id):
+    return chat_id == ADMIN_ID
 
 def send_message(chat_id, text, reply_markup=None, parse_mode=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
-    if parse_mode:
-        payload["parse_mode"] = parse_mode
-    if reply_markup:
-        payload["reply_markup"] = json.dumps(reply_markup)
+    if parse_mode: payload["parse_mode"] = parse_mode
+    if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
+    
     try:
         requests.post(url, json=payload, timeout=10)
-    except:
-        pass
+    except: pass
 
-def get_dashboard_keyboard():
-    return {
-        "keyboard": [
-            ["📱 Basic Phone", "📲 Advanced Phone"],
-            ["🆔 Aadhaar Lookup", "🚗 Vehicle Info"],
-            ["💰 My Credits", "👥 Referral"],
-            ["📞 Contact Admin"]
-        ],
-        "resize_keyboard": True
-    }
-
+# ====================== MAIN BOT ======================
 def main():
-    data = load_data()
-    print(f"✅ Bot Started | Admin ID: {ADMIN_ID}")
-
+    print("✅ Bot Started with Admin Panel + Referral System")
     offset = 0
     while True:
         try:
-            resp = requests.get(
+            response = requests.get(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
-                params={"offset": offset, "timeout": 30},
+                params={"offset": offset, "timeout": 30, "allowed_updates": ["message"]},
                 timeout=35
             )
-            if resp.status_code != 200:
+            if response.status_code != 200: 
                 time.sleep(5)
                 continue
 
-            updates = resp.json().get("result", [])
-            for update in updates:
+            data = response.json()
+            if not data.get("ok"): 
+                time.sleep(5)
+                continue
+
+            for update in data.get("result", []):
                 offset = update["update_id"] + 1
-                if "message" not in update:
-                    continue
+                if "message" not in update: continue
 
                 msg = update["message"]
                 chat_id = msg["chat"]["id"]
-                user_id = msg["from"]["id"]
                 text = msg.get("text", "").strip()
 
-                # Initialize user
-                if str(user_id) not in data["users"]:
-                    data["users"][str(user_id)] = {
-                        "username": msg["from"].get("username", "Unknown"),
-                        "credits": FREE_CREDITS_ON_START,
-                        "searches": 0,
-                        "joined": datetime.now().strftime("%Y-%m-%d %H:%M")
-                    }
+                # ==================== ADMIN COMMANDS ====================
+                if is_admin(chat_id):
+                    if text == "/dashboard" or text == "/admin":
+                        users = load_users()
+                        total_users = len(users)
+                        text_msg = f"📊 **Admin Dashboard**\n\n"
+                        text_msg += f"Total Users: {total_users}\n"
+                        text_msg += f"Admin: {ADMIN_USERNAME}\n\n"
+                        text_msg += "Users List:\n"
+                        
+                        for uid, data in list(users.items())[:30]:  # Show max 30
+                            free = data.get("free_uses", 0)
+                            cred = data.get("credits", 0)
+                            ref = data.get("referrals", 0)
+                            text_msg += f"• `{uid}` | Free: {free} | Credits: {cred} | Ref: {ref}\n"
+                        
+                        if total_users > 30:
+                            text_msg += f"\n... and {total_users-30} more users"
+                        
+                        send_message(chat_id, text_msg, parse_mode="Markdown")
 
-                user = data["users"][str(user_id)]
+                    elif text.startswith("/addcredits"):
+                        try:
+                            _, target_id, amount = text.split()
+                            target_id = int(target_id)
+                            amount = int(amount)
+                            update_user_data(target_id, credits=amount)
+                            send_message(chat_id, f"✅ {amount} credits added to user {target_id}")
+                            send_message(target_id, f"🎁 Admin ne aapko {amount} credits diye hain!")
+                        except:
+                            send_message(chat_id, "❌ Format: /addcredits <user_id> <amount>")
 
-                # ================== WELCOME DASHBOARD ==================
+                # ==================== NORMAL USERS ====================
+                user_data = get_user_data(chat_id)
+                free = user_data["free_uses"]
+                credits = user_data["credits"]
+
                 if text == "/start":
-                    welcome = """🔥 **MULTI LOOKUP BOT**
+                    keyboard = {
+                        "keyboard": [
+                            ["📱 Phone Lookup"],
+                            ["👥 Invite Friends", "📞 Contact Admin"]
+                        ],
+                        "resize_keyboard": True
+                    }
+                    welcome = (
+                        f"👋 Welcome!\n\n"
+                        f"🎁 Free Uses Left: **{free}**\n"
+                        f"💰 Credits: **{credits}**\n\n"
+                        f"Invite friends to earn more credits!\n"
+                        f"2 Referrals = 1 Free Credit"
+                    )
+                    send_message(chat_id, welcome, reply_markup=keyboard, parse_mode="Markdown")
 
-Welcome to the Dashboard!
-
-Choose any search option below 👇"""
-
-                    send_message(chat_id, welcome, reply_markup=get_dashboard_keyboard(), parse_mode="Markdown")
-                    continue
-
-                # ================== BUTTONS ==================
-                elif text == "📱 Basic Phone":
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
-                    else:
+                elif text == "📱 Phone Lookup":
+                    if free > 0 or credits > 0:
                         send_message(chat_id, "📞 Send 10 digit mobile number:")
-
-                elif text == "📲 Advanced Phone":
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
                     else:
-                        send_message(chat_id, "📲 Send 10 digit mobile number for Advanced Info:")
+                        send_message(chat_id, "❌ No free uses or credits left.\nContact Admin to buy credits.")
 
-                elif text == "🆔 Aadhaar Lookup":
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
-                    else:
-                        send_message(chat_id, "🆔 Send 12 digit Aadhaar number:")
-
-                elif text == "🚗 Vehicle Info":
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
-                    else:
-                        send_message(chat_id, "🚗 Send Vehicle RC Number (e.g. RJ18CF3690):")
-
-                # ================== SEARCH LOGIC ==================
-                elif text.replace(" ", "").isdigit() and len(text.replace(" ", "")) in [10, 12]:
-                    num = text.replace(" ", "")
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
-                        continue
-
-                    user["credits"] -= 1
-                    user["searches"] += 1
-                    data["total_searches"] += 1
-
-                    try:
-                        if len(num) == 10:
-                            api_url = f"{EXTERNAL_API_BASE}?type=number_adv&mobile={num}"
-                            title = "Advanced Phone Info"
-                        else:
-                            api_url = f"{EXTERNAL_API_BASE}?type=adhaar&adhaar={num}"
-                            title = "Aadhaar Info"
-
-                        api_resp = requests.get(api_url, timeout=15)
-                        result = api_resp.json()
-                        formatted = json.dumps(result, indent=2, ensure_ascii=False)
-                        send_message(chat_id, f"✅ {title}:\n\n<pre>{formatted}</pre>", parse_mode="HTML")
-                    except:
-                        send_message(chat_id, "❌ API Error. Credit refunded.")
-                        user["credits"] += 1
-                        user["searches"] -= 1
-                        data["total_searches"] -= 1
-
-                # Vehicle Info
-                elif len(text) >= 5 and any(c.isalpha() for c in text):
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
-                        continue
-
-                    user["credits"] -= 1
-                    user["searches"] += 1
-                    data["total_searches"] += 1
-
-                    try:
-                        api_url = f"{EXTERNAL_API_BASE}?type=vehicle&rc={text.upper()}"
-                        api_resp = requests.get(api_url, timeout=15)
-                        result = api_resp.json()
-                        formatted = json.dumps(result, indent=2, ensure_ascii=False)
-                        send_message(chat_id, f"✅ Vehicle Information:\n\n<pre>{formatted}</pre>", parse_mode="HTML")
-                    except:
-                        send_message(chat_id, "❌ API Error. Credit refunded.")
-                        user["credits"] += 1
-                        user["searches"] -= 1
-                        data["total_searches"] -= 1
-
-                # Other Buttons
-                elif text == "💰 My Credits":
-                    send_message(chat_id, f"💰 **Your Credits:** {user['credits']}\n📊 Searches Done: {user['searches']}", parse_mode="Markdown")
-
-                elif text == "👥 Referral":
-                    ref_link = f"https://t.me/{BOT_TOKEN.split(':')[0]}?start=ref_{user_id}"
-                    send_message(chat_id, f"🔗 **Your Referral Link**\n{ref_link}\n\n2 successful referrals = 1 free credit")
+                elif text == "👥 Invite Friends":
+                    ref_link = f"https://t.me/{BOT_TOKEN.split(':')[0]}?start={chat_id}"
+                    send_message(chat_id, f"🔗 Share this link to invite friends:\n\n{ref_link}\n\n2 Referrals = 1 Credit")
 
                 elif text == "📞 Contact Admin":
-                    send_message(chat_id, "📞 Contact Admin: @YourAdminUsername")
+                    send_message(chat_id, f"👨‍💼 Contact Admin:\n{ADMIN_USERNAME}")
 
-                # ================== ADMIN PANEL (Only for you) ==================
-                elif text.lower() == "/admin" and user_id == ADMIN_ID:
-                    stats = f"""🛠 <b>ADMIN PANEL</b>
+                # Handle Phone Number
+                elif text.isdigit() and len(text) == 10:
+                    if free <= 0 and credits <= 0:
+                        send_message(chat_id, "❌ Credits khatam ho gaye. Admin se contact karein.")
+                        continue
 
-Total Users: {len(data['users'])}
-Total Searches: {data['total_searches']}
+                    # API Call
+                    try:
+                        api_url = f"{EXTERNAL_API_BASE}?type=number&mobile={text}"
+                        resp = requests.get(api_url, timeout=15)
+                        data = resp.json()
+                        result = json.dumps(data, indent=2, ensure_ascii=False)
+                        
+                        send_message(chat_id, f"✅ Result for {text}:\n\n<pre>{result}</pre>", parse_mode="HTML")
 
-"""
-                    for uid, u in list(data["users"].items())[:20]:
-                        stats += f"• {u.get('username','Unknown')} ({uid}): {u['credits']} credits\n"
-                    send_message(chat_id, stats, parse_mode="HTML")
+                        # Deduct usage
+                        if free > 0:
+                            update_user_data(chat_id, free_uses=free-1)
+                        else:
+                            update_user_data(chat_id, credits=credits-1)
 
-                # Referral System
-                elif text.startswith("/start ref_"):
-                    referrer_id = text.split("_")[1]
-                    if referrer_id != str(user_id) and referrer_id in data["users"]:
-                        if "referrals" not in data:
-                            data["referrals"] = {}
-                        data["referrals"][str(user_id)] = referrer_id
-                        count = sum(1 for v in data.get("referrals", {}).values() if v == referrer_id)
-                        if count % 2 == 0:
-                            data["users"][referrer_id]["credits"] += 1
-                            send_message(int(referrer_id), "🎉 You earned 1 credit from referrals!")
+                    except:
+                        send_message(chat_id, "❌ Lookup failed. Try again.")
 
-                save_data(data)
+                # Referral Check (when someone starts with ref link)
+                elif text.startswith("/start ") and not is_admin(chat_id):
+                    try:
+                        referrer_id = int(text.split()[1])
+                        if referrer_id != chat_id:  # Avoid self-refer
+                            ref_data = get_user_data(referrer_id)
+                            new_ref = ref_data.get("referrals", 0) + 1
+                            update_user_data(referrer_id, referrals=new_ref)
+                            
+                            if new_ref % 2 == 0:
+                                update_user_data(referrer_id, credits=ref_data.get("credits", 0) + 1)
+                                send_message(referrer_id, "🎉 2 Referrals complete! +1 Credit added.")
+                    except:
+                        pass
+
+                else:
+                    send_message(chat_id, "❌ Invalid command. Use buttons.")
 
             time.sleep(0.5)
 
+        except KeyboardInterrupt:
+            print("Bot Stopped.")
+            break
         except Exception as e:
             print(f"Error: {e}")
             time.sleep(5)

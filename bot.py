@@ -66,7 +66,7 @@ def edit_message(chat_id, message_id, text, parse_mode=None):
 
 # ====================== MAIN BOT ======================
 def main():
-    print("✅ Full Advanced Lookup Bot Started")
+    print("✅ Bot Started - Balance Check Fixed")
     offset = 0
     while True:
         try:
@@ -113,7 +113,7 @@ def main():
                         except:
                             send_message(chat_id, "Usage: /addcredits <user_id> <amount>")
 
-                # MAIN MENU
+                # MENU
                 if text == "/start":
                     keyboard = {
                         "keyboard": [
@@ -124,24 +124,22 @@ def main():
                         ],
                         "resize_keyboard": True
                     }
-                    send_message(chat_id, f"👋 Welcome to Advanced Lookup Bot!\n\n🎁 Free Uses: **{free}**\n💰 Credits: **{credits}**", reply_markup=keyboard, parse_mode="Markdown")
+                    send_message(chat_id, f"👋 Welcome!\n\n🎁 Free Uses: **{free}**\n💰 Credits: **{credits}**", reply_markup=keyboard, parse_mode="Markdown")
 
-                # Button Handlers
                 elif text in ["📱 Phone", "📱 Adv Phone", "🆔 Aadhaar", "✉️ Gmail", "🚗 Vehicle", "🚗 Adv Vehicle", "💰 Paytm"]:
                     if free <= 0 and credits <= 0:
                         send_message(chat_id, "❌ No balance left.\nContact Admin.")
                         continue
-
-                    if "Phone" in text:
-                        send_message(chat_id, "📞 Send 10 digit mobile number:")
-                    elif "Aadhaar" in text:
-                        send_message(chat_id, "🆔 Send 12 digit Aadhaar number:")
-                    elif "Gmail" in text:
-                        send_message(chat_id, "✉️ Send Gmail address:")
-                    elif "Vehicle" in text:
-                        send_message(chat_id, "🚗 Send Vehicle RC Number (e.g. RJ18CF3690):")
-                    elif "Paytm" in text:
-                        send_message(chat_id, "💰 Send Paytm Number or Info:")
+                    prompt = {
+                        "📱 Phone": "10 digit mobile number",
+                        "📱 Adv Phone": "10 digit mobile number",
+                        "🆔 Aadhaar": "12 digit Aadhaar number",
+                        "✉️ Gmail": "Gmail address",
+                        "🚗 Vehicle": "Vehicle RC Number",
+                        "🚗 Adv Vehicle": "Vehicle RC Number",
+                        "💰 Paytm": "Paytm Number"
+                    }.get(text, "input")
+                    send_message(chat_id, f"🔍 Send {prompt}:")
 
                 elif text == "👥 Invite":
                     link = f"https://t.me/{BOT_TOKEN.split(':')[0]}?start={chat_id}"
@@ -150,31 +148,32 @@ def main():
                 elif text == "📞 Admin":
                     send_message(chat_id, f"👨‍💼 Contact Admin:\n{ADMIN_USERNAME}")
 
-                # ==================== LOOKUP PROCESSING ====================
-                elif any([text.isdigit(), "@" in text, text.replace(" ", "").isalnum()]):
+                # ==================== LOOKUP (Strong Balance Check) ====================
+                elif any([text.isdigit(), "@" in text, len(text) > 5]):
+                    # STRONG BALANCE CHECK
+                    if free <= 0 and credits <= 0:
+                        send_message(chat_id, "❌ No balance left.\nContact Admin.")
+                        continue
+
                     wait_id = send_message(chat_id, "⏳ Searching data... (Max 30 sec)")
 
                     try:
-                        # Determine type
+                        # Detect lookup type
                         if "@" in text:
                             lookup_type = "gmail"
                             param = "email"
                         elif len(text) == 10 and text.isdigit():
-                            lookup_type = "number_adv" if "Adv" in str(msg.get("reply_to_message", "")) else "number"  # Simple logic
+                            lookup_type = "number_adv" if "Adv" in text or "Adv" in str(msg) else "number"
                             param = "mobile"
                         elif len(text) == 12 and text.isdigit():
                             lookup_type = "adhaar"
                             param = "adhaar"
-                        elif text.isalnum() and len(text) >= 5:  # RC or Paytm
-                            if any(c.isalpha() for c in text):
-                                lookup_type = "vehicle_adv" if "Adv" in str(msg.get("reply_to_message", "")) else "vehicle"
-                                param = "rc"
-                            else:
-                                lookup_type = "paytm"
-                                param = "info"
+                        elif any(c.isalpha() for c in text.upper()):
+                            lookup_type = "vehicle_adv" if "Adv" in text else "vehicle"
+                            param = "rc"
                         else:
-                            lookup_type = "number"
-                            param = "mobile"
+                            lookup_type = "paytm"
+                            param = "info"
 
                         api_url = f"{EXTERNAL_API_BASE}?type={lookup_type}&{param}={text}"
                         resp = requests.get(api_url, timeout=28)
@@ -193,7 +192,7 @@ def main():
                             result = f"✅ {lookup_type.upper()} Result:\n\n<pre>{formatted}</pre>"
                             edit_message(chat_id, wait_id, result, parse_mode="HTML")
 
-                        # Deduct balance
+                        # Deduct only if successful
                         if free > 0:
                             update_user_data(chat_id, free_uses=free-1)
                         else:

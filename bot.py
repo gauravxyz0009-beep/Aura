@@ -1,187 +1,151 @@
 import requests
 import json
 import time
-import os
-from datetime import datetime
 
-# ================== CONFIG ==================
+# Telegram Bot Token
 BOT_TOKEN = "8914784117:AAGbEGulg9rKF25cmMYedyAJlBaZjIkZy5Q"
+
+# Admin User ID
 ADMIN_ID = 8877443750
+
+# External Phone Lookup API
 EXTERNAL_API_BASE = "https://nitin-apis-the-best.vercel.app/api"
-DATA_FILE = "bot_data.json"
-FREE_CREDITS_ON_START = 2
-# ===========================================
-
-def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            pass
-    return {"users": {}, "total_searches": 0, "referrals": {}}
-
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
 
 def send_message(chat_id, text, reply_markup=None, parse_mode=None):
+    """Helper function to send a message via Telegram Bot API"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True
+    }
+    
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
+    
     try:
-        requests.post(url, json=payload, timeout=10)
-    except:
-        pass
+        response = requests.post(url, json=payload, timeout=10)
+        if not response.ok:
+            print(f"Failed to send message: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"Error sending message: {e}")
 
-def get_keyboard():
-    return {
-        "keyboard": [
-            ["📱 Basic Phone", "📲 Advanced Phone"],
-            ["🆔 Aadhaar Lookup", "🚗 Vehicle Info"],
-            ["💰 My Credits", "👥 Referral"],
-            ["📞 Contact Admin"]
-        ],
-        "resize_keyboard": True
-    }
+def is_admin(chat_id):
+    """Check if user is admin"""
+    return chat_id == ADMIN_ID
 
 def main():
-    data = load_data()
-    print("Bot Running...")
-
+    print(f"✅ Bot started with Admin ID: {ADMIN_ID}")
+    print("Bot is running... Press Ctrl+C to stop.")
+    
     offset = 0
     while True:
         try:
-            resp = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates", 
-                              params={"offset": offset, "timeout": 30}, timeout=35)
+            # Long polling with getUpdates
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+            params = {
+                "offset": offset,
+                "timeout": 30,
+                "allowed_updates": ["message"]
+            }
             
-            if resp.status_code != 200:
+            response = requests.get(url, params=params, timeout=35)
+            
+            if response.status_code != 200:
+                print(f"Error getting updates: {response.status_code}")
                 time.sleep(5)
                 continue
-
-            for update in resp.json().get("result", []):
+                
+            data = response.json()
+            
+            if not data.get("ok"):
+                print("Error in API response")
+                time.sleep(5)
+                continue
+            
+            updates = data.get("result", [])
+            
+            for update in updates:
                 offset = update["update_id"] + 1
+                
                 if "message" not in update:
                     continue
-
-                msg = update["message"]
-                chat_id = msg["chat"]["id"]
-                user_id = msg["from"]["id"]
-                text = msg.get("text", "").strip()
-
-                # Create user if new
-                user_key = str(user_id)
-                if user_key not in data["users"]:
-                    data["users"][user_key] = {
-                        "credits": FREE_CREDITS_ON_START,
-                        "searches": 0
-                    }
-
-                user = data["users"][user_key]
-
-                # Simple Welcome
+                    
+                message = update["message"]
+                chat_id = message["chat"]["id"]
+                text = message.get("text", "").strip()
+                
+                # Admin check - Only admin can use the bot
+                if not is_admin(chat_id):
+                    send_message(chat_id, "❌ You are not authorized to use this bot.")
+                    continue
+                
+                # Handle /start command
                 if text == "/start":
-                    welcome = """🔥 **MULTI LOOKUP BOT**
-
-Choose any option below 👇"""
-                    send_message(chat_id, welcome, reply_markup=get_keyboard(), parse_mode="Markdown")
-                    continue
-
-                # Buttons
-                if user["credits"] <= 0 and text not in ["💰 My Credits", "👥 Referral", "📞 Contact Admin"]:
-                    send_message(chat_id, "❌ No credits left.\nUse Referral to earn credits.")
-                    continue
-
-                if text == "📱 Basic Phone":
-                    send_message(chat_id, "📞 Send 10 digit mobile number:")
-
-                elif text == "📲 Advanced Phone":
-                    send_message(chat_id, "📲 Send 10 digit mobile number for Advanced Info:")
-
-                elif text == "🆔 Aadhaar Lookup":
-                    send_message(chat_id, "🆔 Send 12 digit Aadhaar number:")
-
-                elif text == "🚗 Vehicle Info":
-                    send_message(chat_id, "🚗 Send Vehicle RC Number (e.g. RJ18CF3690):")
-
-                # Number Search
-                elif text.replace(" ", "").isdigit():
-                    num = text.replace(" ", "")
-                    if len(num) not in [10, 12]:
-                        send_message(chat_id, "❌ Invalid number.")
-                        continue
-
-                    user["credits"] -= 1
-                    user["searches"] += 1
-                    data["total_searches"] += 1
-
+                    welcome_text = (
+                        "👋 Welcome to the Phone Lookup Bot!\n\n"
+                        "Use the keyboard below to perform a phone number lookup."
+                    )
+                    
+                    keyboard = {
+                        "keyboard": [
+                            ["📱 Phone Lookup"]
+                        ],
+                        "resize_keyboard": True,
+                        "one_time_keyboard": False
+                    }
+                    
+                    send_message(chat_id, welcome_text, reply_markup=keyboard)
+                
+                # Handle Phone Lookup button press
+                elif text == "📱 Phone Lookup":
+                    prompt_text = "📞 Send 10 digit mobile number:"
+                    send_message(chat_id, prompt_text)
+                
+                # Handle 10-digit phone number
+                elif text.isdigit() and len(text) == 10:
                     try:
-                        if len(num) == 10:
-                            api_url = f"{EXTERNAL_API_BASE}?type=number_adv&mobile={num}"
-                            title = "Advanced Phone"
-                        else:
-                            api_url = f"{EXTERNAL_API_BASE}?type=adhaar&adhaar={num}"
-                            title = "Aadhaar"
-
-                        r = requests.get(api_url, timeout=15)
-                        result = r.json()
-                        formatted = json.dumps(result, indent=2, ensure_ascii=False)
-                        send_message(chat_id, f"✅ {title} Result:\n\n<pre>{formatted}</pre>", parse_mode="HTML")
-                    except:
-                        send_message(chat_id, "❌ API Error.")
-                        user["credits"] += 1   # refund
-                        user["searches"] -= 1
-                        data["total_searches"] -= 1
-
-                # Vehicle
-                elif len(text) >= 5 and any(c.isalpha() for c in text):
-                    user["credits"] -= 1
-                    user["searches"] += 1
-                    data["total_searches"] += 1
-
-                    try:
-                        api_url = f"{EXTERNAL_API_BASE}?type=vehicle&rc={text.upper()}"
-                        r = requests.get(api_url, timeout=15)
-                        result = r.json()
-                        formatted = json.dumps(result, indent=2, ensure_ascii=False)
-                        send_message(chat_id, f"✅ Vehicle Result:\n\n<pre>{formatted}</pre>", parse_mode="HTML")
-                    except:
-                        send_message(chat_id, "❌ API Error or Invalid RC number.")
-                        user["credits"] += 1
-                        user["searches"] -= 1
-                        data["total_searches"] -= 1
-
-                elif text == "💰 My Credits":
-                    send_message(chat_id, f"💰 Your Credits: **{user['credits']}**", parse_mode="Markdown")
-
-                elif text == "👥 Referral":
-                    link = f"https://t.me/{BOT_TOKEN.split(':')[0]}?start=ref_{user_id}"
-                    send_message(chat_id, f"🔗 Your Referral Link:\n{link}\n\n2 referrals = 1 credit")
-
-                elif text == "📞 Contact Admin":
-                    send_message(chat_id, "Contact Admin: @YourAdminUsername")
-
-                # ADMIN ONLY
-                elif text.lower() == "/admin" and user_id == ADMIN_ID:
-                    stats = f"""🛠 **ADMIN PANEL**
-
-Total Users: {len(data['users'])}
-Total Searches: {data['total_searches']}
-
-"""
-                    for uid, u in list(data["users"].items())[:15]:
-                        stats += f"{uid}: {u['credits']} credits\n"
-                    send_message(chat_id, stats, parse_mode="Markdown")
-
-                save_data(data)
-
+                        api_url = f"{EXTERNAL_API_BASE}?type=number&mobile={text}"
+                        print(f"Calling API for number {text}")
+                        
+                        api_response = requests.get(api_url, timeout=15)
+                        
+                        if api_response.status_code != 200:
+                            send_message(chat_id, f"❌ API returned error: {api_response.status_code}")
+                            continue
+                        
+                        api_data = api_response.json()
+                        formatted_json = json.dumps(api_data, indent=2, ensure_ascii=False)
+                        
+                        result_text = f"✅ Phone Lookup Result:\n\n<pre>{formatted_json}</pre>"
+                        send_message(chat_id, result_text, parse_mode="HTML")
+                        
+                    except json.JSONDecodeError:
+                        send_message(chat_id, "❌ Invalid response from API (not JSON)")
+                    except requests.exceptions.RequestException:
+                        send_message(chat_id, "❌ Failed to connect to the lookup API")
+                    except Exception as e:
+                        send_message(chat_id, f"❌ An error occurred: {str(e)[:150]}")
+                
+                # Invalid input
+                else:
+                    error_text = (
+                        "❌ Invalid input!\n\n"
+                        "Please send a valid 10-digit mobile number (numbers only).\n"
+                        "Or press the 📱 Phone Lookup button."
+                    )
+                    send_message(chat_id, error_text)
+            
             time.sleep(0.5)
-
+            
+        except KeyboardInterrupt:
+            print("\nBot stopped by user.")
+            break
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Unexpected error: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":

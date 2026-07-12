@@ -5,9 +5,6 @@ import time
 # Telegram Bot Token
 BOT_TOKEN = "8914784117:AAGbEGulg9rKF25cmMYedyAJlBaZjIkZy5Q"
 
-# Admin User ID
-ADMIN_ID = 8877443750
-
 # External Phone Lookup API
 EXTERNAL_API_BASE = "https://nitin-apis-the-best.vercel.app/api"
 
@@ -33,18 +30,15 @@ def send_message(chat_id, text, reply_markup=None, parse_mode=None):
     except Exception as e:
         print(f"Error sending message: {e}")
 
-def is_admin(chat_id):
-    """Check if user is admin"""
-    return chat_id == ADMIN_ID
 
 def main():
-    print(f"✅ Bot started with Admin ID: {ADMIN_ID}")
+    print("✅ Bot started successfully!")
     print("Bot is running... Press Ctrl+C to stop.")
     
     offset = 0
     while True:
         try:
-            # Long polling with getUpdates
+            # Long polling
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
             params = {
                 "offset": offset,
@@ -77,11 +71,6 @@ def main():
                 message = update["message"]
                 chat_id = message["chat"]["id"]
                 text = message.get("text", "").strip()
-                
-                # Admin check - Only admin can use the bot
-                if not is_admin(chat_id):
-                    send_message(chat_id, "❌ You are not authorized to use this bot.")
-                    continue
                 
                 # Handle /start command
                 if text == "/start":

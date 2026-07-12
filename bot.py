@@ -50,12 +50,25 @@ def send_message(chat_id, text, reply_markup=None, parse_mode=None):
     if parse_mode: payload["parse_mode"] = parse_mode
     if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
     try:
+        r = requests.post(url, json=payload, timeout=10)
+        return r.json().get("result", {}).get("message_id")
+    except:
+        return None
+
+def edit_message(chat_id, message_id, text, parse_mode=None):
+    if not message_id:
+        return
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+    payload = {"chat_id": chat_id, "message_id": message_id, "text": text}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    try:
         requests.post(url, json=payload, timeout=10)
     except: pass
 
 # ====================== MAIN BOT ======================
 def main():
-    print("✅ Bot Started with Phone + Aadhaar Lookup")
+    print("✅ Bot Started - Improved Wait & Data Handling")
     offset = 0
     while True:
         try:
@@ -85,7 +98,7 @@ def main():
                 free = user_data["free_uses"]
                 credits = user_data["credits"]
 
-                # ==================== ADMIN ====================
+                # ADMIN COMMANDS
                 if is_admin(chat_id):
                     if text in ["/dashboard", "/admin"]:
                         users = load_users()
@@ -102,7 +115,7 @@ def main():
                         except:
                             send_message(chat_id, "Format: /addcredits <user_id> <amount>")
 
-                # ==================== USER MENU ====================
+                # USER MENU
                 if text == "/start":
                     keyboard = {
                         "keyboard": [
@@ -112,17 +125,11 @@ def main():
                         ],
                         "resize_keyboard": True
                     }
-                    welcome = (
-                        f"👋 Welcome to Lookup Bot!\n\n"
-                        f"🎁 Free Uses: **{free}**\n"
-                        f"💰 Credits: **{credits}**\n\n"
-                        "2 Referrals = 1 Free Credit"
-                    )
+                    welcome = f"👋 Welcome!\n\n🎁 Free Uses: **{free}**\n💰 Credits: **{credits}**\n\n2 Referrals = 1 Credit"
                     send_message(chat_id, welcome, reply_markup=keyboard, parse_mode="Markdown")
 
                 elif text in ["📱 Phone Lookup", "🆔 Aadhaar Lookup"]:
-                    lookup_type = "phone" if text == "📱 Phone Lookup" else "aadhaar"
-                    prompt = "10 digit mobile number" if lookup_type == "phone" else "12 digit Aadhaar number"
+                    prompt = "10 digit mobile number" if text == "📱 Phone Lookup" else "12 digit Aadhaar number"
                     if free > 0 or credits > 0:
                         send_message(chat_id, f"🔍 Send {prompt}:")
                     else:
@@ -135,44 +142,37 @@ def main():
                 elif text == "📞 Contact Admin":
                     send_message(chat_id, f"👨‍💼 Contact Admin:\n{ADMIN_USERNAME}")
 
-                # ==================== HANDLE LOOKUP INPUT ====================
-                elif text.isdigit():
-                    if len(text) == 10:
-                        lookup_type = "number"
-                        display_type = "Phone"
-                    elif len(text) == 12:
-                        lookup_type = "adhaar"
-                        display_type = "Aadhaar"
-                    else:
-                        send_message(chat_id, "❌ Invalid number. 10 digit phone ya 12 digit Aadhaar bhejein.")
-                        continue
-
+                # HANDLE LOOKUP
+                elif text.isdigit() and len(text) in [10, 12]:
                     if free <= 0 and credits <= 0:
-                        send_message(chat_id, "❌ Balance khatam ho gaya. Admin se contact karein.")
+                        send_message(chat_id, "❌ Balance khatam. Admin se contact karein.")
                         continue
 
-                    # Show "Please Wait" message
-                    wait_msg = send_message(chat_id, "⏳ Please wait... Searching data (10 seconds)")
-                    
-                    try:
-                        # Simulate 10 second wait (realistic processing time)
-                        time.sleep(8)  
+                    lookup_type = "number" if len(text) == 10 else "adhaar"
+                    display_type = "Phone" if lookup_type == "number" else "Aadhaar"
 
+                    # Send wait message
+                    wait_id = send_message(chat_id, "⏳ Please wait... Searching data")
+
+                    try:
+                        time.sleep(10)  # Processing delay
+                        
                         api_url = f"{EXTERNAL_API_BASE}?type={lookup_type}&{'mobile' if lookup_type=='number' else 'adhaar'}={text}"
                         resp = requests.get(api_url, timeout=20)
-                        
+
                         if resp.status_code != 200:
-                            send_message(chat_id, "❌ API Error. Try again later.")
+                            edit_message(chat_id, wait_id, "❌ API Error. Try again later.")
                             continue
 
                         api_data = resp.json()
 
-                        # Check if data is empty or not found
-                        if not api_data or api_data == {} or (isinstance(api_data, dict) and len(api_data) <= 1):
-                            send_message(chat_id, "❌ No Data Found for this number/Aadhaar.")
+                        # Check for no data
+                        if not api_data or api_data == {} or len(str(api_data)) < 20:
+                            edit_message(chat_id, wait_id, "❌ Data Unavailable")
                         else:
                             formatted = json.dumps(api_data, indent=2, ensure_ascii=False)
-                            send_message(chat_id, f"✅ {display_type} Lookup Result:\n\n<pre>{formatted}</pre>", parse_mode="HTML")
+                            result_text = f"✅ {display_type} Lookup Result for {text}:\n\n<pre>{formatted}</pre>"
+                            edit_message(chat_id, wait_id, result_text, parse_mode="HTML")
 
                         # Deduct balance
                         if free > 0:
@@ -181,7 +181,7 @@ def main():
                             update_user_data(chat_id, credits=credits-1)
 
                     except Exception:
-                        send_message(chat_id, "❌ Lookup failed. Please try again.")
+                        edit_message(chat_id, wait_id, "❌ Lookup failed. Please try again.")
 
             time.sleep(0.5)
 

@@ -37,7 +37,7 @@ def send_message(chat_id, text, reply_markup=None, parse_mode=None):
     except:
         pass
 
-def get_dashboard_keyboard():
+def get_keyboard():
     return {
         "keyboard": [
             ["📱 Basic Phone", "📲 Advanced Phone"],
@@ -50,22 +50,19 @@ def get_dashboard_keyboard():
 
 def main():
     data = load_data()
-    print(f"✅ Bot Started | Admin ID: {ADMIN_ID}")
+    print("Bot Running...")
 
     offset = 0
     while True:
         try:
-            resp = requests.get(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
-                params={"offset": offset, "timeout": 30},
-                timeout=35
-            )
+            resp = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates", 
+                              params={"offset": offset, "timeout": 30}, timeout=35)
+            
             if resp.status_code != 200:
                 time.sleep(5)
                 continue
 
-            updates = resp.json().get("result", [])
-            for update in updates:
+            for update in resp.json().get("result", []):
                 offset = update["update_id"] + 1
                 if "message" not in update:
                     continue
@@ -75,58 +72,46 @@ def main():
                 user_id = msg["from"]["id"]
                 text = msg.get("text", "").strip()
 
-                # Initialize user
-                if str(user_id) not in data["users"]:
-                    data["users"][str(user_id)] = {
-                        "username": msg["from"].get("username", "Unknown"),
+                # Create user if new
+                user_key = str(user_id)
+                if user_key not in data["users"]:
+                    data["users"][user_key] = {
                         "credits": FREE_CREDITS_ON_START,
-                        "searches": 0,
-                        "joined": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        "searches": 0
                     }
 
-                user = data["users"][str(user_id)]
+                user = data["users"][user_key]
 
-                # ================== WELCOME DASHBOARD ==================
+                # Simple Welcome
                 if text == "/start":
                     welcome = """🔥 **MULTI LOOKUP BOT**
 
-Welcome to the Dashboard!
-
-Choose any search option below 👇"""
-
-                    send_message(chat_id, welcome, reply_markup=get_dashboard_keyboard(), parse_mode="Markdown")
+Choose any option below 👇"""
+                    send_message(chat_id, welcome, reply_markup=get_keyboard(), parse_mode="Markdown")
                     continue
 
-                # ================== BUTTONS ==================
-                elif text == "📱 Basic Phone":
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
-                    else:
-                        send_message(chat_id, "📞 Send 10 digit mobile number:")
+                # Buttons
+                if user["credits"] <= 0 and text not in ["💰 My Credits", "👥 Referral", "📞 Contact Admin"]:
+                    send_message(chat_id, "❌ No credits left.\nUse Referral to earn credits.")
+                    continue
+
+                if text == "📱 Basic Phone":
+                    send_message(chat_id, "📞 Send 10 digit mobile number:")
 
                 elif text == "📲 Advanced Phone":
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
-                    else:
-                        send_message(chat_id, "📲 Send 10 digit mobile number for Advanced Info:")
+                    send_message(chat_id, "📲 Send 10 digit mobile number for Advanced Info:")
 
                 elif text == "🆔 Aadhaar Lookup":
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
-                    else:
-                        send_message(chat_id, "🆔 Send 12 digit Aadhaar number:")
+                    send_message(chat_id, "🆔 Send 12 digit Aadhaar number:")
 
                 elif text == "🚗 Vehicle Info":
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
-                    else:
-                        send_message(chat_id, "🚗 Send Vehicle RC Number (e.g. RJ18CF3690):")
+                    send_message(chat_id, "🚗 Send Vehicle RC Number (e.g. RJ18CF3690):")
 
-                # ================== SEARCH LOGIC ==================
-                elif text.replace(" ", "").isdigit() and len(text.replace(" ", "")) in [10, 12]:
+                # Number Search
+                elif text.replace(" ", "").isdigit():
                     num = text.replace(" ", "")
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
+                    if len(num) not in [10, 12]:
+                        send_message(chat_id, "❌ Invalid number.")
                         continue
 
                     user["credits"] -= 1
@@ -136,77 +121,60 @@ Choose any search option below 👇"""
                     try:
                         if len(num) == 10:
                             api_url = f"{EXTERNAL_API_BASE}?type=number_adv&mobile={num}"
-                            title = "Advanced Phone Info"
+                            title = "Advanced Phone"
                         else:
                             api_url = f"{EXTERNAL_API_BASE}?type=adhaar&adhaar={num}"
-                            title = "Aadhaar Info"
+                            title = "Aadhaar"
 
-                        api_resp = requests.get(api_url, timeout=15)
-                        result = api_resp.json()
+                        r = requests.get(api_url, timeout=15)
+                        result = r.json()
                         formatted = json.dumps(result, indent=2, ensure_ascii=False)
-                        send_message(chat_id, f"✅ {title}:\n\n<pre>{formatted}</pre>", parse_mode="HTML")
+                        send_message(chat_id, f"✅ {title} Result:\n\n<pre>{formatted}</pre>", parse_mode="HTML")
                     except:
-                        send_message(chat_id, "❌ API Error. Credit refunded.")
-                        user["credits"] += 1
+                        send_message(chat_id, "❌ API Error.")
+                        user["credits"] += 1   # refund
                         user["searches"] -= 1
                         data["total_searches"] -= 1
 
-                # Vehicle Info
+                # Vehicle
                 elif len(text) >= 5 and any(c.isalpha() for c in text):
-                    if user["credits"] <= 0:
-                        send_message(chat_id, "❌ No credits left.")
-                        continue
-
                     user["credits"] -= 1
                     user["searches"] += 1
                     data["total_searches"] += 1
 
                     try:
                         api_url = f"{EXTERNAL_API_BASE}?type=vehicle&rc={text.upper()}"
-                        api_resp = requests.get(api_url, timeout=15)
-                        result = api_resp.json()
+                        r = requests.get(api_url, timeout=15)
+                        result = r.json()
                         formatted = json.dumps(result, indent=2, ensure_ascii=False)
-                        send_message(chat_id, f"✅ Vehicle Information:\n\n<pre>{formatted}</pre>", parse_mode="HTML")
+                        send_message(chat_id, f"✅ Vehicle Result:\n\n<pre>{formatted}</pre>", parse_mode="HTML")
                     except:
-                        send_message(chat_id, "❌ API Error. Credit refunded.")
+                        send_message(chat_id, "❌ API Error or Invalid RC number.")
                         user["credits"] += 1
                         user["searches"] -= 1
                         data["total_searches"] -= 1
 
-                # Other Buttons
                 elif text == "💰 My Credits":
-                    send_message(chat_id, f"💰 **Your Credits:** {user['credits']}\n📊 Searches Done: {user['searches']}", parse_mode="Markdown")
+                    send_message(chat_id, f"💰 Your Credits: **{user['credits']}**", parse_mode="Markdown")
 
                 elif text == "👥 Referral":
-                    ref_link = f"https://t.me/{BOT_TOKEN.split(':')[0]}?start=ref_{user_id}"
-                    send_message(chat_id, f"🔗 **Your Referral Link**\n{ref_link}\n\n2 successful referrals = 1 free credit")
+                    link = f"https://t.me/{BOT_TOKEN.split(':')[0]}?start=ref_{user_id}"
+                    send_message(chat_id, f"🔗 Your Referral Link:\n{link}\n\n2 referrals = 1 credit")
 
                 elif text == "📞 Contact Admin":
-                    send_message(chat_id, "📞 Contact Admin: @YourAdminUsername")
+                    send_message(chat_id, "Contact Admin: @YourAdminUsername")
 
-                # ================== ADMIN PANEL (Only for you) ==================
+                # ADMIN ONLY
                 elif text.lower() == "/admin" and user_id == ADMIN_ID:
-                    stats = f"""🛠 <b>ADMIN PANEL</b>
+                    stats = f"""🛠 **ADMIN PANEL**
 
 Total Users: {len(data['users'])}
 Total Searches: {data['total_searches']}
 
 """
-                    for uid, u in list(data["users"].items())[:20]:
-                        stats += f"• {u.get('username','Unknown')} ({uid}): {u['credits']} credits\n"
-                    send_message(chat_id, stats, parse_mode="HTML")
-
-                # Referral System
-                elif text.startswith("/start ref_"):
-                    referrer_id = text.split("_")[1]
-                    if referrer_id != str(user_id) and referrer_id in data["users"]:
-                        if "referrals" not in data:
-                            data["referrals"] = {}
-                        data["referrals"][str(user_id)] = referrer_id
-                        count = sum(1 for v in data.get("referrals", {}).values() if v == referrer_id)
-                        if count % 2 == 0:
-                            data["users"][referrer_id]["credits"] += 1
-                            send_message(int(referrer_id), "🎉 You earned 1 credit from referrals!")
+                    for uid, u in list(data["users"].items())[:15]:
+                        stats += f"{uid}: {u['credits']} credits\n"
+                    send_message(chat_id, stats, parse_mode="Markdown")
 
                 save_data(data)
 

@@ -120,15 +120,11 @@ def main():
                     )
                     send_message(chat_id, welcome, reply_markup=keyboard, parse_mode="Markdown")
 
-                elif text == "📱 Phone Lookup":
+                elif text in ["📱 Phone Lookup", "🆔 Aadhaar Lookup"]:
+                    lookup_type = "phone" if text == "📱 Phone Lookup" else "aadhaar"
+                    prompt = "10 digit mobile number" if lookup_type == "phone" else "12 digit Aadhaar number"
                     if free > 0 or credits > 0:
-                        send_message(chat_id, "📞 Send 10 digit mobile number:")
-                    else:
-                        send_message(chat_id, "❌ No balance left.\nContact Admin.")
-
-                elif text == "🆔 Aadhaar Lookup":
-                    if free > 0 or credits > 0:
-                        send_message(chat_id, "🆔 Send 12 digit Aadhaar number:")
+                        send_message(chat_id, f"🔍 Send {prompt}:")
                     else:
                         send_message(chat_id, "❌ No balance left.\nContact Admin.")
 
@@ -139,39 +135,53 @@ def main():
                 elif text == "📞 Contact Admin":
                     send_message(chat_id, f"👨‍💼 Contact Admin:\n{ADMIN_USERNAME}")
 
-                # ==================== HANDLE INPUT ====================
-                elif (text.isdigit() and len(text) == 10) or (text.isdigit() and len(text) == 12):
-                    lookup_type = "number" if len(text) == 10 else "adhaar"
-                    prompt = "Phone" if lookup_type == "number" else "Aadhaar"
-
-                    if free <= 0 and credits <= 0:
-                        send_message(chat_id, "❌ Balance khatam. Admin se contact karein.")
+                # ==================== HANDLE LOOKUP INPUT ====================
+                elif text.isdigit():
+                    if len(text) == 10:
+                        lookup_type = "number"
+                        display_type = "Phone"
+                    elif len(text) == 12:
+                        lookup_type = "adhaar"
+                        display_type = "Aadhaar"
+                    else:
+                        send_message(chat_id, "❌ Invalid number. 10 digit phone ya 12 digit Aadhaar bhejein.")
                         continue
 
+                    if free <= 0 and credits <= 0:
+                        send_message(chat_id, "❌ Balance khatam ho gaya. Admin se contact karein.")
+                        continue
+
+                    # Show "Please Wait" message
+                    wait_msg = send_message(chat_id, "⏳ Please wait... Searching data (10 seconds)")
+                    
                     try:
+                        # Simulate 10 second wait (realistic processing time)
+                        time.sleep(8)  
+
                         api_url = f"{EXTERNAL_API_BASE}?type={lookup_type}&{'mobile' if lookup_type=='number' else 'adhaar'}={text}"
-                        resp = requests.get(api_url, timeout=15)
+                        resp = requests.get(api_url, timeout=20)
                         
                         if resp.status_code != 200:
-                            send_message(chat_id, f"❌ API Error: {resp.status_code}")
+                            send_message(chat_id, "❌ API Error. Try again later.")
                             continue
 
-                        data = resp.json()
-                        result = json.dumps(data, indent=2, ensure_ascii=False)
+                        api_data = resp.json()
 
-                        send_message(chat_id, f"✅ {prompt} Lookup Result:\n\n<pre>{result}</pre>", parse_mode="HTML")
+                        # Check if data is empty or not found
+                        if not api_data or api_data == {} or (isinstance(api_data, dict) and len(api_data) <= 1):
+                            send_message(chat_id, "❌ No Data Found for this number/Aadhaar.")
+                        else:
+                            formatted = json.dumps(api_data, indent=2, ensure_ascii=False)
+                            send_message(chat_id, f"✅ {display_type} Lookup Result:\n\n<pre>{formatted}</pre>", parse_mode="HTML")
 
-                        # Deduct usage
+                        # Deduct balance
                         if free > 0:
                             update_user_data(chat_id, free_uses=free-1)
                         else:
                             update_user_data(chat_id, credits=credits-1)
 
-                    except Exception as e:
-                        send_message(chat_id, f"❌ Error occurred: {str(e)[:100]}")
-
-                else:
-                    send_message(chat_id, "❌ Invalid input.\nUse the buttons below.")
+                    except Exception:
+                        send_message(chat_id, "❌ Lookup failed. Please try again.")
 
             time.sleep(0.5)
 

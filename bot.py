@@ -66,7 +66,7 @@ def edit_message(chat_id, message_id, text, parse_mode=None):
 
 # ====================== MAIN BOT ======================
 def main():
-    print("✅ Bot Started - Balance Check Fixed")
+    print("✅ Bot Started - Balance + Admin Commands Fixed")
     offset = 0
     while True:
         try:
@@ -96,24 +96,35 @@ def main():
                 free = user_data.get("free_uses", 0)
                 credits = user_data.get("credits", 0)
 
-                # ADMIN
+                # ==================== ADMIN COMMANDS ====================
                 if is_admin(chat_id):
                     if text in ["/dashboard", "/admin"]:
                         users = load_users()
                         txt = f"📊 **Admin Dashboard**\nTotal Users: {len(users)}\n\n"
                         for uid, d in list(users.items())[:30]:
-                            txt += f"• `{uid}` | Free:{d.get('free_uses',0)} | Cred:{d.get('credits',0)}\n"
+                            txt += f"• `{uid}` | Free:{d.get('free_uses',0)} | Credits:{d.get('credits',0)}\n"
                         send_message(chat_id, txt, parse_mode="Markdown")
 
                     elif text.startswith("/addcredits"):
                         try:
                             _, uid, amt = text.split()
-                            update_user_data(int(uid), credits=int(amt))
+                            current = get_user_data(int(uid)).get("credits", 0)
+                            update_user_data(int(uid), credits=current + int(amt))
                             send_message(chat_id, f"✅ {amt} credits added to {uid}")
                         except:
                             send_message(chat_id, "Usage: /addcredits <user_id> <amount>")
 
-                # MENU
+                    elif text.startswith("/removecredits"):
+                        try:
+                            _, uid, amt = text.split()
+                            current = get_user_data(int(uid)).get("credits", 0)
+                            new_credits = max(0, current - int(amt))
+                            update_user_data(int(uid), credits=new_credits)
+                            send_message(chat_id, f"✅ {amt} credits removed from {uid}. New Balance: {new_credits}")
+                        except:
+                            send_message(chat_id, "Usage: /removecredits <user_id> <amount>")
+
+                # ==================== USER MENU ====================
                 if text == "/start":
                     keyboard = {
                         "keyboard": [
@@ -130,7 +141,7 @@ def main():
                     if free <= 0 and credits <= 0:
                         send_message(chat_id, "❌ No balance left.\nContact Admin.")
                         continue
-                    prompt = {
+                    prompts = {
                         "📱 Phone": "10 digit mobile number",
                         "📱 Adv Phone": "10 digit mobile number",
                         "🆔 Aadhaar": "12 digit Aadhaar number",
@@ -138,8 +149,9 @@ def main():
                         "🚗 Vehicle": "Vehicle RC Number",
                         "🚗 Adv Vehicle": "Vehicle RC Number",
                         "💰 Paytm": "Paytm Number"
-                    }.get(text, "input")
-                    send_message(chat_id, f"🔍 Send {prompt}:")
+                    }
+                    send_message(chat_id, f"🔍 Send {prompts.get(text, 'details')}:")
+                    continue
 
                 elif text == "👥 Invite":
                     link = f"https://t.me/{BOT_TOKEN.split(':')[0]}?start={chat_id}"
@@ -148,9 +160,9 @@ def main():
                 elif text == "📞 Admin":
                     send_message(chat_id, f"👨‍💼 Contact Admin:\n{ADMIN_USERNAME}")
 
-                # ==================== LOOKUP (Strong Balance Check) ====================
+                # ==================== LOOKUP (STRONG CHECK) ====================
                 elif any([text.isdigit(), "@" in text, len(text) > 5]):
-                    # STRONG BALANCE CHECK
+                    # Final Strong Balance Check
                     if free <= 0 and credits <= 0:
                         send_message(chat_id, "❌ No balance left.\nContact Admin.")
                         continue
@@ -158,17 +170,17 @@ def main():
                     wait_id = send_message(chat_id, "⏳ Searching data... (Max 30 sec)")
 
                     try:
-                        # Detect lookup type
+                        # Determine type
                         if "@" in text:
                             lookup_type = "gmail"
                             param = "email"
                         elif len(text) == 10 and text.isdigit():
-                            lookup_type = "number_adv" if "Adv" in text or "Adv" in str(msg) else "number"
+                            lookup_type = "number_adv" if "Adv" in text else "number"
                             param = "mobile"
                         elif len(text) == 12 and text.isdigit():
                             lookup_type = "adhaar"
                             param = "adhaar"
-                        elif any(c.isalpha() for c in text.upper()):
+                        elif any(c.isalpha() for c in text):
                             lookup_type = "vehicle_adv" if "Adv" in text else "vehicle"
                             param = "rc"
                         else:
@@ -192,7 +204,7 @@ def main():
                             result = f"✅ {lookup_type.upper()} Result:\n\n<pre>{formatted}</pre>"
                             edit_message(chat_id, wait_id, result, parse_mode="HTML")
 
-                        # Deduct only if successful
+                        # Deduct Balance
                         if free > 0:
                             update_user_data(chat_id, free_uses=free-1)
                         else:

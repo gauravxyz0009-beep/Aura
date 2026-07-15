@@ -1,217 +1,558 @@
 import requests
-import json
 import time
-import os
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 
-# ========================= CONFIG =========================
 BOT_TOKEN = "8914784117:AAGbEGulg9rKF25cmMYedyAJlBaZjIkZy5Q"
 ADMIN_ID = 8877443750
-ADMIN_USERNAME = "@gaurav0247"
-PHONE_API = "https://number-to-info-s0ry.onrender.com/lookup/"
-EXTERNAL_API_BASE = "https://nitin-apis-the-best.vercel.app/api"  # Only for Aadhaar, Gmail, Vehicle, Paytm
-DATA_FILE = "users.json"
-# ========================================================
 
-def load_users():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
+API = f"https://api.telegram.org/bot{BOT_TOKEN}/"
 
-def save_users(users):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, indent=2, ensure_ascii=False)
+USER_FILE = "users.json"
+LECTURE_FILE = "lectures.json"
 
-def get_user_data(user_id):
-    users = load_users()
-    uid = str(user_id)
-    if uid not in users:
-        users[uid] = {"free_uses": 2, "credits": 0, "referrals": 0, "referred_by": None, "history": []}
-        save_users(users)
-    return users[uid]
+offset = 0
 
-def update_user_data(user_id, **kwargs):
-    users = load_users()
-    uid = str(user_id)
-    if uid not in users:
-        users[uid] = {"free_uses": 2, "credits": 0, "referrals": 0, "referred_by": None, "history": []}
-    for key, value in kwargs.items():
-        users[uid][key] = value
-    save_users(users)
 
-def add_to_history(user_id, search_type, query):
-    users = load_users()
-    uid = str(user_id)
-    if uid not in users:
-        users[uid] = {"free_uses": 2, "credits": 0, "referrals": 0, "referred_by": None, "history": []}
-    entry = {"time": datetime.now().strftime("%d-%m %H:%M"), "type": search_type.upper(), "query": query}
-    if "history" not in users[uid]:
-        users[uid]["history"] = []
-    users[uid]["history"].append(entry)
-    if len(users[uid]["history"]) > 30:
-        users[uid]["history"] = users[uid]["history"][-30:]
-    save_users(users)
+# ---------------- DATABASE ----------------
 
-def is_admin(chat_id):
-    return chat_id == ADMIN_ID
-
-def send_message(chat_id, text, reply_markup=None, parse_mode="Markdown"):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True, "parse_mode": parse_mode}
-    if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
+def load_json(file):
     try:
-        r = requests.post(url, json=payload, timeout=10)
-        return r.json().get("result", {}).get("message_id")
+        with open(file, "r") as f:
+            return json.load(f)
     except:
-        return None
+        return {}
 
-def edit_message(chat_id, message_id, text, parse_mode="Markdown"):
-    if not message_id: return
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-    payload = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": parse_mode}
+
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=4)
+
+
+def create_user(user_id):
+    users = load_json(USER_FILE)
+
+    uid = str(user_id)
+
+    if uid not in users:
+        users[uid] = {
+            "credits": 7,
+            "lectures": 0,
+            "streak": 1,
+            "last_claim": "",
+            "last_day": str(datetime.now().date())
+        }
+
+        save_json(USER_FILE, users)
+
+
+# ---------------- TELEGRAM ----------------
+
+def send_message(chat_id, text, keyboard=None):
+
+    data = {
+        "chat_id": chat_id,
+        "text": text
+    }
+
+    if keyboard:
+        data["reply_markup"] = {
+            "inline_keyboard": keyboard
+        }
+
+    requests.post(
+        API + "sendMessage",
+        json=data
+    )
+
+
+def get_updates():
+
+    global offset
+
+    r = requests.get(
+        API + "getUpdates",
+        params={
+            "offset": offset,
+            "timeout": 30
+        }
+    )
+
+    return r.json().get("result", [])
+
+
+# ---------------- DASHBOARD ----------------
+
+def dashboard(chat_id):
+
+    keyboard = [
+
+        [
+            {
+                "text":"📘 Physics Live Lec",
+                "callback_data":"physics"
+            }
+        ],
+
+        [
+            {
+                "text":"🧪 Physical Chemistry Live",
+                "callback_data":"chemistry"
+            }
+        ],
+
+        [
+            {
+                "text":"🧬 Biology Live Lec",
+                "callback_data":"biology"
+            }
+        ],
+
+        [
+            {
+                "text":"📊 Study Tracker",
+                "callback_data":"tracker"
+            }
+        ],
+
+        [
+            {
+                "text":"🎁 Daily Free Credit",
+                "callback_data":"claim"
+            },
+
+            {
+                "text":"💳 My Credits",
+                "callback_data":"credits"
+            }
+        ],
+
+        [
+            {
+                "text":"👤 Contact Admin",
+                "url":"https://t.me/gaurav0247"
+            }
+        ]
+    ]
+
+
+    send_message(
+        chat_id,
+        "🔥 Welcome to GxNOVaa\n\n"
+        "This bot is made by @gaurav0247\n\n"
+        "Select Option 👇",
+        keyboard
+    )
+
+
+# ---------------- LECTURE DATA ----------------
+
+def default_lectures():
+
+    data = {
+
+        "mr":{
+            "name":"Physics by MR Sir",
+            "time":"08:47",
+            "link":""
+        },
+
+        "saleem":{
+            "name":"Physics by Saleem Sir",
+            "time":"08:47",
+            "link":""
+        },
+
+
+        "sudhanshu":{
+            "name":"Physical Chemistry by Sudhanshu Sir",
+            "time":"11:03",
+            "link":""
+        },
+
+
+        "amit":{
+            "name":"Physical Chemistry by Amit Sir",
+            "time":"11:03",
+            "link":""
+        },
+
+
+        "bio1":{
+            "name":"Biology Live 1",
+            "time":"13:20",
+            "link":""
+        },
+
+
+        "bio2":{
+            "name":"Biology Live 2",
+            "time":"13:20",
+            "link":""
+        }
+
+    }
+
+    save_json(LECTURE_FILE,data)
+
+
+if not load_json(LECTURE_FILE):
+    default_lectures()
+
+
+# ---------------- START BOT ----------------
+
+
+while True:
+
     try:
-        requests.post(url, json=payload, timeout=10)
-    except: pass
 
-# ====================== MAIN BOT ======================
-def main():
-    print("✅ Bot Started with New Number Info API")
-    offset = 0
-    while True:
-        try:
-            resp = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates", 
-                               params={"offset": offset, "timeout": 25}, timeout=30)
-            if resp.status_code != 200:
-                time.sleep(5)
-                continue
+        updates = get_updates()
 
-            data = resp.json()
-            if not data.get("ok"):
-                time.sleep(5)
-                continue
 
-            for update in data.get("result", []):
-                offset = update["update_id"] + 1
-                if "message" not in update: continue
+        for update in updates:
+
+            offset = update["update_id"] + 1
+
+
+            if "message" in update:
 
                 msg = update["message"]
+
                 chat_id = msg["chat"]["id"]
-                text = msg.get("text", "").strip()
 
-                user_data = get_user_data(chat_id)
-                free = user_data.get("free_uses", 0)
-                credits = user_data.get("credits", 0)
+                text = msg.get("text","")
 
-                # ADMIN
-                if is_admin(chat_id):
-                    if text in ["/start", "🔧 Admin Panel"]:
-                        keyboard = {"keyboard": [["🔧 Admin Panel"], ["📊 Dashboard"]], "resize_keyboard": True}
-                        send_message(chat_id, "🔥 **ADMIN PANEL** 🔥\nUse buttons below", reply_markup=keyboard)
-                        continue
 
-                    if text in ["/dashboard", "📊 Dashboard"]:
-                        users = load_users()
-                        txt = "🔥 **ADMIN DASHBOARD** 🔥\n\n"
-                        txt += f"👥 Total Users: `{len(users)}`\n"
-                        txt += f"🕒 {datetime.now().strftime('%H:%M')}\n\n"
-                        for uid, d in list(users.items())[:25]:
-                            hist = len(d.get("history", []))
-                            txt += f"👤 `{uid}` | Free:**{d.get('free_uses')}** | Credit:**{d.get('credits')}** | Search:**{hist}**\n"
-                        send_message(chat_id, txt)
-                        continue
-
-                    if text.startswith("/addcredits"):
-                        try:
-                            _, uid, amt = text.split()
-                            current = get_user_data(int(uid)).get("credits", 0)
-                            update_user_data(int(uid), credits=current + int(amt))
-                            send_message(chat_id, f"✅ {amt} Credits Added to {uid}")
-                        except:
-                            send_message(chat_id, "Usage: /addcredits <user_id> <amount>")
-
-                    if text.startswith("/removecredits"):
-                        try:
-                            _, uid, amt = text.split()
-                            current = get_user_data(int(uid)).get("credits", 0)
-                            new = max(0, current - int(amt))
-                            update_user_data(int(uid), credits=new)
-                            send_message(chat_id, f"✅ {amt} Credits Removed from {uid}")
-                        except:
-                            send_message(chat_id, "Usage: /removecredits <user_id> <amount>")
-
-                # USER MENU
                 if text == "/start":
-                    keyboard = {"keyboard": [["📱 Phone Lookup"], ["🆔 Aadhaar", "✉️ Gmail"], ["🚗 Vehicle", "🚗 Adv Vehicle"], ["💰 Paytm"], ["👥 Invite Friends", "📞 Contact Admin"]], "resize_keyboard": True}
-                    send_message(chat_id, f"👋 **Welcome to Aura Bot!**\n\n🎁 Free Uses: **{free}**\n💰 Credits: **{credits}**", reply_markup=keyboard)
 
-                elif text == "📱 Phone Lookup":
-                    if free <= 0 and credits <= 0 and not is_admin(chat_id):
-                        send_message(chat_id, "❌ No balance left.\nContact Admin.")
-                        continue
-                    send_message(chat_id, "📞 Send 10 digit mobile number:")
+                    create_user(chat_id)
 
-                elif text in ["🆔 Aadhaar", "✉️ Gmail", "🚗 Vehicle", "🚗 Adv Vehicle", "💰 Paytm"]:
-                    if free <= 0 and credits <= 0 and not is_admin(chat_id):
-                        send_message(chat_id, "❌ No balance left.")
-                        continue
-                    send_message(chat_id, f"🔍 Send {text} details:")
+                    dashboard(chat_id)
 
-                elif text == "👥 Invite Friends":
-                    link = f"https://t.me/{BOT_TOKEN.split(':')[0]}?start={chat_id}"
-                    send_message(chat_id, f"🔗 **Your Referral Link:**\n{link}\n\n2 Referrals = 1 Credit")
 
-                elif text == "📞 Contact Admin":
-                    send_message(chat_id, f"👨‍💼 **Contact Admin:**\n{ADMIN_USERNAME}")
 
-                # ==================== NEW PHONE LOOKUP ====================
-                elif text.isdigit() and len(text) == 10:
-                    if free <= 0 and credits <= 0 and not is_admin(chat_id):
-                        send_message(chat_id, "❌ No balance left.\nContact Admin.")
-                        continue
+            elif "callback_query" in update:
 
-                    wait_id = send_message(chat_id, "⏳ Searching number info...")
+                query = update["callback_query"]
 
-                    try:
-                        api_url = f"{PHONE_API}{text}"
-                        resp = requests.get(api_url, timeout=25)
-                        api_data = resp.json()
+                chat_id = query["message"]["chat"]["id"]
 
-                        if not api_data or len(str(api_data)) < 30:
-                            edit_message(chat_id, wait_id, "❌ Data Unavailable")
-                        else:
-                            formatted = json.dumps(api_data, indent=2, ensure_ascii=False)
-                            result = f"✅ **Number Info Result:**\n\n<pre>{formatted}</pre>"
-                            edit_message(chat_id, wait_id, result, parse_mode="HTML")
+                data = query["data"]
 
-                        add_to_history(chat_id, "Phone", text)
 
-                        if free > 0:
-                            update_user_data(chat_id, free_uses=free-1)
-                        else:
-                            update_user_data(chat_id, credits=credits-1)
+                if data=="physics":
 
-                    except Exception:
-                        edit_message(chat_id, wait_id, "❌ Data Unavailable")
+                    send_message(
+                        chat_id,
+                        "📘 Physics Live Lec\n\nSelect Teacher 👇",
+                        [
+                            [
+                                {
+                                    "text":"⚡ MR Sir",
+                                    "callback_data":"mr"
+                                }
+                            ],
 
-                # Other lookups (Aadhaar, Gmail etc.)
-                else:
-                    if len(text) > 5 and (free > 0 or credits > 0 or is_admin(chat_id)):
-                        send_message(chat_id, "This lookup is under maintenance.")
-                    else:
-                        send_message(chat_id, "❌ Invalid input.")
+                            [
+                                {
+                                    "text":"🔥 Saleem Sir",
+                                    "callback_data":"saleem"
+                                }
+                            ]
+                        ]
+                    )
 
-            time.sleep(0.3)
 
-        except KeyboardInterrupt:
-            print("Bot Stopped.")
-            break
-        except Exception as e:
-            print(f"Error: {e}")
-            time.sleep(5)
+                elif data=="chemistry":
 
-if __name__ == "__main__":
-    main()
+                    send_message(
+                        chat_id,
+                        "🧪 Physical Chemistry Live Lec\n\nSelect Teacher 👇",
+                        [
+                            [
+                                {
+                                    "text":"Sudhanshu Sir",
+                                    "callback_data":"sudhanshu"
+                                }
+                            ],
+
+                            [
+                                {
+                                    "text":"Amit Sir",
+                                    "callback_data":"amit"
+                                }
+                            ]
+                        ]
+                    )
+
+
+                elif data=="biology":
+
+                    send_message(
+                        chat_id,
+                        "🧬 Biology Live Lec\n\n",
+                        [
+                            [
+                                {
+                                    "text":"Biology Live 1",
+                                    "callback_data":"bio1"
+                                }
+                            ],
+
+                            [
+                                {
+                                    "text":"Biology Live 2",
+                                    "callback_data":"bio2"
+                                }
+                            ]
+                        ]
+        )
+                    # ---------------- CREDIT SYSTEM ----------------
+
+def use_credit(user_id):
+
+    users = load_json(USER_FILE)
+    uid = str(user_id)
+
+    if uid not in users:
+        create_user(user_id)
+        users = load_json(USER_FILE)
+
+    if users[uid]["credits"] <= 0:
+        return False
+
+    users[uid]["credits"] -= 1
+    users[uid]["lectures"] += 1
+
+    save_json(USER_FILE, users)
+
+    return True
+
+
+
+def show_credits(user_id):
+
+    users = load_json(USER_FILE)
+
+    data = users[str(user_id)]
+
+    return (
+        "💳 My Credits\n\n"
+        f"⭐ Available Credits: {data['credits']}\n"
+        f"📚 Lectures Watched: {data['lectures']}"
+    )
+
+
+
+# ---------------- DAILY CLAIM ----------------
+
+def claim_daily(user_id):
+
+    users = load_json(USER_FILE)
+
+    uid = str(user_id)
+
+    now = datetime.now()
+
+    last = users[uid]["last_claim"]
+
+
+    if last:
+
+        last_time = datetime.fromisoformat(last)
+
+        if now - last_time < timedelta(hours=24):
+
+            return False
+
+
+    users[uid]["credits"] += 4
+    users[uid]["last_claim"] = now.isoformat()
+
+    save_json(USER_FILE, users)
+
+    return True
+
+
+
+# ---------------- STUDY TRACKER ----------------
+
+def study_tracker(user_id):
+
+    users = load_json(USER_FILE)
+
+    data = users[str(user_id)]
+
+    return (
+        "📊 Study Tracker\n\n"
+        f"📚 Completed Lectures: {data['lectures']}\n"
+        f"🔥 Streak: {data['streak']} Days\n"
+        f"⭐ Credits: {data['credits']}"
+    )
+
+
+
+# ---------------- LECTURE CHECK ----------------
+
+def open_lecture(user_id, key):
+
+    lectures = load_json(LECTURE_FILE)
+
+    lec = lectures[key]
+
+
+    now = datetime.now().strftime("%H:%M")
+
+
+    if now < lec["time"]:
+
+        return (
+            "⏳ Class abhi start nahi hui\n\n"
+            f"{lec['name']}\n"
+            f"⏰ Time: {lec['time']}"
+        )
+
+
+    if lec["link"] == "":
+
+        return (
+            "⚠️ Lecture link not added yet\n\n"
+            "Admin will update soon."
+        )
+
+
+    if use_credit(user_id):
+
+        return (
+            "🔴 LIVE NOW\n\n"
+            f"{lec['name']}\n\n"
+            f"▶️ Watch Lecture:\n{lec['link']}"
+        )
+
+
+    return (
+        "❌ Credits khatam ho gaye\n\n"
+        "🎁 Daily Free Credit claim karein"
+    )
+
+
+
+# ---------------- ADMIN ----------------
+
+def is_admin(user_id):
+
+    return user_id == ADMIN_ID
+
+
+
+def admin_panel(chat_id):
+
+    keyboard = [
+
+        [
+            {
+                "text":"📊 Bot Stats",
+                "callback_data":"stats"
+            }
+        ],
+
+        [
+            {
+                "text":"💳 Add Credit",
+                "callback_data":"admin_credit"
+            }
+        ],
+
+        [
+            {
+                "text":"🔗 Update Link",
+                "callback_data":"admin_link"
+            }
+        ]
+
+    ]
+
+
+    send_message(
+        chat_id,
+        "⚙️ GxNOVaa Admin Panel",
+        keyboard
+    )
+
+
+
+# ---------------- CALLBACK CONTINUE ----------------
+
+
+# Is part ko Part 1 ke callback section ke andar
+# biology ke baad add karna
+
+
+if data in [
+    "mr",
+    "saleem",
+    "sudhanshu",
+    "amit",
+    "bio1",
+    "bio2"
+]:
+
+    send_message(
+        chat_id,
+        open_lecture(chat_id,data)
+    )
+
+
+elif data=="credits":
+
+    send_message(
+        chat_id,
+        show_credits(chat_id)
+    )
+
+
+elif data=="claim":
+
+    if claim_daily(chat_id):
+
+        send_message(
+            chat_id,
+            "🎉 Daily Reward Claimed!\n\n"
+            "+4 Credits Added"
+        )
+
+    else:
+
+        send_message(
+            chat_id,
+            "⏳ Already Claimed\n\n"
+            "Next claim after 24 hours"
+        )
+
+
+elif data=="tracker":
+
+    send_message(
+        chat_id,
+        study_tracker(chat_id)
+    )
+
+
+
+# ---------------- ADMIN COMMAND ----------------
+
+
+if text == "/admin":
+
+    if is_admin(chat_id):
+
+        admin_panel(chat_id)
+
+    else:
+
+        send_message(
+            chat_id,
+            "❌ Access Denied"
+    )
+                    
